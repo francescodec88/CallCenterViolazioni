@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Call Center | Violazioni</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] }, colors: { brand: { 50: '#f0f9ff', 100: '#e0f2fe', 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1', 800: '#075985' } } } }
+    }
+  </script>
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  
+  <style>
+    body { background-color: #f1f5f9; color: #0f172a; overflow: hidden; }
+    
+    /* BARRA DI SCORRIMENTO ELEGANTE */
+    .no-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+    .no-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .no-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; border: 2px solid #ffffff; }
+    .no-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+    .no-scrollbar { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+    
+    /* STILE LINK MANUALE (Azzurri, sottolineati e cliccabili) */
+    .prose a { color: #0ea5e9; text-decoration: underline; font-weight: 700; transition: color 0.2s ease; }
+    .prose a:hover { color: #0284c7; }
+
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(5px); }
+    .glass-header { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+    .bento-card { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+    .light-input { background: #f8fafc; border: 1px solid #cbd5e1; color: #1e293b; }
+    .light-input:focus { background: #ffffff; border-color: #0284c7; box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15); outline: none; }
+  </style>
+</head>
+<body class="antialiased h-screen w-full flex flex-col">
+
+<div id="app" class="w-full h-full flex flex-col relative" @click="chiudiDropdowns">
+  
+  <div v-if="!datiOperatore.registrato && !isLoadingOggi" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+      <div class="w-16 h-16 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center mx-auto mb-4"><i class="ph-fill ph-user-circle-plus text-4xl"></i></div>
+      <h2 class="text-2xl font-black text-slate-800 mb-2">Benvenuto nell'App</h2>
+      <p class="text-sm text-slate-500 mb-6">Primo avvio rilevato. Inserisci i tuoi dati operativi per inizializzare il tuo database privato.</p>
+      
+      <form @submit.prevent="salvaDatiOperatoreIniziali" class="space-y-4 text-left">
+        <div><label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Cognome</label><input type="text" v-model="setupOp.cognome" required class="w-full px-4 py-3 light-input rounded-xl text-sm font-bold uppercase" placeholder="Es. ROSSI"></div>
+        <div><label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Nome</label><input type="text" v-model="setupOp.nome" required class="w-full px-4 py-3 light-input rounded-xl text-sm font-bold uppercase" placeholder="Es. MARIO"></div>
+        <div><label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Matricola</label><input type="text" v-model="setupOp.matricola" required class="w-full px-4 py-3 light-input rounded-xl text-sm font-bold uppercase" placeholder="Es. 1234"></div>
+        <button type="submit" :disabled="isSubmittingSetup" class="w-full mt-4 py-3.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all">
+          <i v-if="isSubmittingSetup" class="ph ph-spinner animate-spin text-lg"></i>
+          <span v-else>Inizia Turno</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <header class="glass-header px-4 md:px-6 py-3 flex items-center justify-between shrink-0 z-20 border-b border-slate-200">
+    <div class="flex items-center gap-3">
+      <div class="bg-brand-600 text-white p-2 rounded-xl shadow-md flex items-center justify-center"><i class="ph ph-police-car text-xl md:text-2xl"></i></div>
+      <div>
+        <h1 class="text-base md:text-xl font-bold text-slate-800 leading-none tracking-tight">Call Center</h1>
+        <p class="text-[10px] md:text-[11px] text-brand-600 font-bold tracking-widest uppercase mt-1">{{ dataOdierna }}</p>
+      </div>
+    </div>
+
+    <div v-if="isDesktop && datiOperatore.registrato" class="hidden md:flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+      <button @click="desktopTab = 'desk'" :class="desktopTab === 'desk' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2"><i class="ph ph-headset text-base"></i> Operativo</button>
+      <button @click="desktopTab = 'archive'" :class="desktopTab === 'archive' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2"><i class="ph ph-database text-base"></i> Archivio</button>
+      <button @click="desktopTab = 'manuale'" :class="desktopTab === 'manuale' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2"><i class="ph ph-book-open text-base"></i> Manuale</button>
+    </div>
+    
+    <div v-if="datiOperatore.registrato" class="hidden md:flex items-center gap-2 bg-slate-100 border border-slate-200 px-4 py-1.5 rounded-full">
+      <i class="ph-fill ph-user-circle text-brand-600 text-lg"></i>
+      <span class="text-xs font-black text-slate-700 tracking-wider">{{ datiOperatore.nomeFormat }} <span class="text-[10px] text-slate-400 font-medium ml-1">({{ datiOperatore.matricola }})</span></span>
+    </div>
+    
+    <div v-if="!isDesktop && datiOperatore.registrato" class="flex items-center gap-2 text-xs font-bold">
+      <span class="bg-brand-50 border border-brand-100 text-brand-700 px-3 py-1.5 rounded-lg">{{ totaleOggi }} Chiamate</span>
+    </div>
+  </header>
+
+  <main class="flex-1 overflow-hidden relative pb-14 md:pb-0">
+    <transition name="fade">
+      <div v-show="showDeskWrapper" class="absolute inset-0 p-3 md:p-6 overflow-y-auto no-scrollbar">
+        <div class="max-w-[1400px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 h-full">
+          
+          <div v-show="showForm" class="md:col-span-8 flex flex-col gap-4">
+            <div class="bento-card rounded-2xl p-5 md:p-7 relative transition-all" :class="editingRow ? 'ring-2 ring-amber-400 shadow-amber-500/10' : ''">
+              
+              <div class="flex justify-between items-start md:items-center mb-5 border-b border-slate-100 pb-4 flex-col md:flex-row gap-4">
+                <h2 class="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2.5">
+                  <i :class="editingRow ? 'ph-pencil-simple text-amber-500' : 'ph-phone-call text-brand-600'" class="ph-fill text-xl"></i> 
+                  {{ editingRow ? 'Modifica Chiamata' : 'Registrazione' }}
+                </h2>
+
+                <div class="flex flex-col md:flex-row items-start md:items-center gap-2 w-full md:w-auto">
+                  <div class="flex gap-2 w-full md:w-auto overflow-x-auto no-scrollbar pb-1 md:pb-0">
+                    <button type="button" v-for="btn in scorciatoieBottoni" :key="btn.nome" @click="apriLinkDiretto(btn.link)"
+                            class="px-2.5 py-1.5 text-[10px] font-bold bg-slate-50 hover:bg-brand-50 text-slate-600 hover:text-brand-700 border border-slate-200 rounded-lg transition-colors shadow-sm whitespace-nowrap flex items-center gap-1">
+                      <i class="ph ph-link text-brand-500"></i> {{ btn.nome }}
+                    </button>
+                  </div>
+                  <div class="relative w-full md:w-auto">
+                    <select @change="apriLinkRapido($event)" class="w-full md:w-auto bg-slate-50 text-slate-600 font-bold text-xs px-3 py-1.5 md:py-2 rounded-xl border border-slate-200 focus:outline-none cursor-pointer hover:bg-slate-100 hover:text-brand-600 transition-colors">
+                      <option value="">🔗 Altri Link...</option>
+                      <option v-for="link in scorciatoieMenu" :key="link.nome" :value="link.link">{{ link.nome }}</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              
+              <form @submit.prevent="salvaDati" @keydown.ctrl.enter.prevent="salvaDati" class="space-y-5">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Targa / Verbale</label>
+                    <input type="text" v-model="form.targa" ref="targaInput" @input="form.targa = form.targa.toUpperCase().replace(/\s+/g, '')" @blur="gestisciTargaBlur"
+                           class="w-full px-4 py-3 light-input rounded-xl text-center text-lg md:text-xl font-mono text-brand-700 tracking-[0.1em] uppercase" placeholder="AB123CD" autocomplete="off">
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Nominativo</label>
+                    <input type="text" v-model="form.nominativo" @input="form.nominativo = form.nominativo.toUpperCase()"
+                           class="w-full px-4 py-3 light-input rounded-xl text-sm font-semibold uppercase" placeholder="MARIO ROSSI" autocomplete="off">
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Telefono</label>
+                    <input type="text" v-model="form.telefono" class="w-full px-4 py-3 light-input rounded-xl text-sm font-semibold" placeholder="333 1234567" autocomplete="off">
+                  </div>
+                </div>
+
+                <div class="relative" @click.stop>
+                  <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Motivo Principale</label>
+                  <div class="relative flex items-center">
+                    <input type="text" v-model="form.motivoSelezionato" @focus="menuMotivoAperto = true" @click="menuMotivoAperto = true" @input="menuMotivoAperto = true" @blur="chiudiMenuMotivoRitardato"
+                           class="w-full px-4 py-3 light-input rounded-xl text-sm font-semibold pr-10" placeholder="Seleziona o digita...">
+                    <button type="button" @click.stop="menuMotivoAperto = !menuMotivoAperto" tabindex="-1" class="absolute right-0 h-full px-4 text-slate-400 hover:text-brand-600 transition-colors"><i class="ph ph-caret-down text-lg" :class="{'rotate-180': menuMotivoAperto}"></i></button>
+                  </div>
+                  <transition name="fade">
+                    <div v-show="menuMotivoAperto" class="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto no-scrollbar">
+                      <div v-for="opt in opzioniMotivoFiltrate" :key="opt" @click="selezionaMotivo(opt)" class="px-4 py-3 text-xs md:text-sm text-slate-700 hover:bg-brand-50 cursor-pointer border-b border-slate-100 font-medium transition-colors">{{ opt }}</div>
+                    </div>
+                  </transition>
+                </div>
+
+                <transition name="fade">
+                  <div v-if="suggerimentoContestuale" class="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 flex items-start gap-3 shadow-sm">
+                    <i class="ph-fill ph-lightbulb text-amber-500 text-xl shrink-0"></i>
+                    <div>
+                      <span class="font-bold uppercase tracking-wider block text-[10px] text-amber-700 mb-1">Promemoria Operativo</span>
+                      <p class="leading-relaxed font-medium">{{ suggerimentoContestuale }}</p>
+                    </div>
+                  </div>
+                </transition>
+
+                <div>
+                  <div class="flex justify-between items-end mb-1.5">
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">Note Operatore</label>
+                    <span class="text-[10px] text-slate-400 font-mono bg-slate-100 px-2 py-0.5 rounded border border-slate-200 hidden md:block">Ctrl + Invio</span>
+                  </div>
+                  <textarea v-model="form.note" rows="2" class="w-full px-4 py-3 light-input rounded-xl text-sm font-medium resize-none" placeholder="Dettagli..."></textarea>
+                  <div class="flex flex-wrap gap-2 mt-3">
+                    <button type="button" v-for="nota in macroNote" :key="nota" @click="aggiungiNota(nota)" class="text-[11px] bg-slate-100 hover:bg-brand-100 text-slate-600 font-bold px-3 py-1.5 rounded-full border border-slate-200 shadow-sm transition-colors"><i class="ph ph-plus text-[10px]"></i> {{ nota }}</button>
+                  </div>
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                  <button v-if="editingRow" type="button" @click="annullaModifica" class="py-3.5 px-5 rounded-xl bg-slate-200 text-slate-700 font-bold text-xs uppercase transition-all">Annulla</button>
+                  <button type="submit" class="flex-1 py-3.5 rounded-xl text-white font-bold text-xs md:text-sm uppercase tracking-widest flex items-center justify-center gap-2.5 shadow-md bg-brand-600 hover:bg-brand-700 transition-all"><i :class="editingRow ? 'ph-pencil-simple' : 'ph-paper-plane-right'" class="ph-fill text-lg"></i> {{ editingRow ? 'Aggiorna Chiamata' : 'Registra Chiamata' }}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div v-show="showStats" class="md:col-span-4 flex flex-col gap-4 h-full">
+            <div class="bento-card rounded-2xl p-4 md:p-5 flex flex-col h-full min-h-[400px]">
+              <div class="bg-gradient-to-br from-brand-600 to-brand-800 rounded-xl p-5 text-center relative overflow-hidden mb-5 shrink-0 shadow-md">
+                <i class="ph-fill ph-trend-up absolute -right-4 -bottom-4 text-7xl text-white/10"></i>
+                <div class="text-5xl md:text-6xl font-black text-white mb-1 transition-transform" :class="{'scale-110 text-emerald-300': animateCount}">{{ totaleOggi }}</div>
+                <div class="text-[10px] font-bold text-brand-100 uppercase tracking-widest">Gestite Oggi</div>
+              </div>
+
+              <div class="flex-1 overflow-y-auto no-scrollbar mb-4 relative pr-1">
+                <div v-if="isLoadingOggi" class="absolute inset-0 flex items-center justify-center"><i class="ph ph-spinner animate-spin text-2xl text-brand-500"></i></div>
+                <div v-else-if="chiamateOggi.length === 0" class="h-full flex flex-col items-center justify-center text-slate-400 p-4 text-center">
+                  <i class="ph-fill ph-coffee text-4xl mb-3 opacity-30"></i>
+                  <p class="text-xs font-medium">Nessuna registrazione oggi</p>
+                </div>
+                <div v-else class="space-y-2">
+                  <div v-for="(ch, idx) in chiamateOggi" :key="idx" @click="apriDettaglio(ch)" class="bg-slate-50 p-3 rounded-xl border border-slate-200/60 flex flex-col gap-1.5 cursor-pointer hover:bg-white hover:border-brand-300 hover:shadow-sm transition-all group" :class="{'border-amber-400 bg-amber-50/50': ch.pending}">
+                    <div class="flex justify-between items-center w-full">
+                      <span class="text-[10px] font-mono font-bold text-brand-700 bg-brand-50 px-2 py-0.5 rounded border border-brand-100 flex items-center gap-1.5"><i v-if="ch.pending" class="ph ph-spinner animate-spin text-amber-500"></i><i v-else class="ph-fill ph-clock text-brand-400"></i> {{ ch.ora }}</span>
+                      <p class="font-bold text-slate-800 text-xs md:text-sm tracking-wider uppercase group-hover:text-brand-600 transition-colors">{{ ch.targa || 'SENZA TARGA' }}</p>
+                    </div>
+                    <p class="text-[11px] text-slate-500 truncate font-medium">{{ ch.nominativo || 'N.D.' }} <span v-if="ch.telefono" class="text-slate-400 font-normal">({{ ch.telefono }})</span></p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- PULSANTIERA SCARICA E SCELTA INVIO -->
+              <div class="flex flex-col gap-2 mt-auto shrink-0">
+                <div class="grid grid-cols-2 gap-2">
+                  <button @click="gestisciPDF('scarica')" :disabled="isGeneratingPDF" class="py-3 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 transition-colors border border-slate-200">
+                    <i class="ph ph-download-simple text-lg"></i> Scarica PDF
+                  </button>
+                  <button @click="modaleEmail.show = true" :disabled="isGeneratingPDF" class="py-3 bg-brand-500 text-white hover:bg-brand-600 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 transition-colors shadow-sm">
+                    <i v-if="isGeneratingPDF" class="ph ph-spinner animate-spin text-lg"></i>
+                    <i v-else class="ph ph-paper-plane-tilt text-lg"></i> Invia Report
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="fade">
+      <div v-show="showArchive" class="absolute inset-0 flex flex-col bg-slate-100">
+        <div class="p-4 md:p-6 border-b border-slate-200 glass-header flex flex-col md:flex-row justify-between items-start md:items-center gap-5 shrink-0 shadow-sm">
+          <div>
+            <h2 class="text-lg md:text-xl font-bold text-slate-800">Database Globale</h2>
+            <p class="text-xs text-slate-500 mt-1 font-medium tracking-wide">Ricerca avanzata nello storico chiamate.</p>
+          </div>
+          <form @submit.prevent="avviaRicercaStorica" class="w-full md:w-auto flex flex-col sm:flex-row gap-3">
+            <div class="flex gap-3">
+              <div><label class="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Da Data</label><input type="date" v-model="filtri.dataDa" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:border-brand-500 focus:outline-none"></div>
+              <div><label class="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">A Data</label><input type="date" v-model="filtri.dataA" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:border-brand-500 focus:outline-none"></div>
+            </div>
+            <div class="flex flex-1 gap-2 items-end">
+              <div class="relative flex-1 min-w-[180px]"><input type="text" v-model="filtri.query" placeholder="Cerca targa, nome, nota..." class="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:border-brand-500 focus:outline-none"></div>
+              <button type="submit" :disabled="isSearching" class="bg-brand-600 hover:bg-brand-700 text-white px-5 py-2 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center gap-2 transition-colors shrink-0">
+                <i v-if="isSearching" class="ph ph-spinner animate-spin text-lg"></i><i v-else class="ph ph-magnifying-glass text-lg"></i> Cerca
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="flex-1 overflow-auto p-4 md:p-6 no-scrollbar relative">
+          <div v-if="isSearching" class="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-sm z-10"><p class="text-brand-600 text-sm font-bold tracking-widest uppercase flex items-center gap-3"><i class="ph ph-spinner animate-spin text-2xl"></i> Ricerca...</p></div>
+          <div v-else-if="risultatiRicerca.length === 0" class="absolute inset-0 flex items-center justify-center"><p class="text-slate-500 text-sm font-medium">Nessun record trovato.</p></div>
+          <template v-else>
+            <div class="hidden md:block bento-card rounded-xl overflow-hidden">
+              <table class="w-full text-left border-collapse min-w-[800px]">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th class="px-5 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data/Ora</th>
+                    <th class="px-5 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Targa / Verbale</th>
+                    <th class="px-5 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Motivo</th>
+                    <th class="px-5 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nominativo / Tel</th>
+                    <th class="px-5 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Azione</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                  <tr v-for="(row, idx) in risultatiRicerca" :key="idx" @click="apriDettaglio(row)" class="hover:bg-brand-50/50 cursor-pointer group transition-colors">
+                    <td class="px-5 py-3 text-xs text-slate-600"><span class="font-bold text-slate-800">{{ row.data }}</span> <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded font-mono ml-1">{{ row.ora }}</span></td>
+                    <td class="px-5 py-3 text-xs font-bold font-mono tracking-wider text-brand-700">{{ row.targa || '-' }}</td>
+                    <td class="px-5 py-3 text-xs text-slate-700 truncate max-w-[200px]">{{ row.motivo || '-' }}</td>
+                    <td class="px-5 py-3 text-xs text-slate-600">{{ row.nominativo || '-' }} <span v-if="row.telefono" class="text-slate-400 text-[10px] ml-1">({{ row.telefono }})</span></td>
+                    <td class="px-5 py-3 text-right"><span class="text-brand-600 text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1.5"><i class="ph-fill ph-eye"></i> Apri</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            
+            <div class="md:hidden space-y-3 pb-6">
+              <div v-for="(row, idx) in risultatiRicerca" :key="'mob-'+idx" @click="apriDettaglio(row)" class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 relative cursor-pointer active:bg-slate-50 transition-colors">
+                <div class="flex justify-between items-start">
+                  <div>
+                    <span class="font-bold text-brand-700 text-base font-mono block tracking-wide">{{ row.targa || 'SENZA TARGA' }}</span>
+                    <span class="text-[10px] text-slate-500 font-mono">{{ row.data }} - {{ row.ora }}</span>
+                  </div>
+                  <span class="bg-brand-50 text-brand-700 px-2 py-1 rounded text-[10px] font-bold max-w-[120px] truncate text-right border border-brand-100">{{ row.motivo || 'N.D.' }}</span>
+                </div>
+                <div class="text-xs text-slate-700 font-semibold border-t border-slate-100 pt-2 mt-1">
+                  {{ row.nominativo || 'Nessun Nominativo' }} <span v-if="row.telefono" class="text-slate-400 font-normal">({{ row.telefono }})</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="fade">
+      <div v-show="showManuale" class="absolute inset-0 bg-slate-100 flex flex-col p-4 md:p-6 overflow-hidden">
+        <div class="flex justify-between items-center mb-5 shrink-0 glass-header p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div class="flex items-center gap-3"><i class="ph-fill ph-book-open text-brand-600 text-2xl"></i><h2 class="text-lg md:text-xl font-bold text-slate-800">Manuale Operativo</h2></div>
+        </div>
+
+        <div class="flex-1 flex gap-5 overflow-hidden">
+          <div class="w-1/3 md:w-1/4 bento-card rounded-2xl overflow-y-auto no-scrollbar flex flex-col py-2">
+            <div v-if="isLoadingManuale" class="p-6 text-xs text-brand-600 text-center flex flex-col items-center gap-3"><i class="ph ph-spinner animate-spin text-2xl"></i><span class="font-bold tracking-widest uppercase">Lettura...</span></div>
+            <button v-for="(sez, idx) in sezioniManuale" :key="sez.id || idx" @click="sezioneManualeSelezionata = sez"
+                    :class="sezioneManualeSelezionata === sez ? 'bg-brand-50 text-brand-700 border-l-4 border-brand-500 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800 border-l-4 border-transparent font-medium'"
+                    class="px-5 py-4 text-xs md:text-sm text-left transition-all border-b border-slate-100 last:border-0 flex items-center justify-between">
+              <span class="truncate pr-2">{{ sez.titolo }}</span><i class="ph ph-caret-right text-xs opacity-50"></i>
+            </button>
+          </div>
+
+          <div class="flex-1 bento-card rounded-2xl p-6 md:p-8 overflow-y-auto no-scrollbar relative">
+            <div v-if="!sezioneManualeSelezionata && !isLoadingManuale" class="h-full flex items-center justify-center text-slate-400 text-xs md:text-sm">
+              <div class="text-center"><i class="ph-fill ph-book-bookmark text-5xl mb-4 text-slate-300"></i><p class="font-medium tracking-wide text-slate-500">Seleziona una voce dall'indice.</p></div>
+            </div>
+            <div v-else-if="sezioneManualeSelezionata">
+              <h3 class="text-xl md:text-2xl font-black text-slate-800 mb-6 border-b-2 border-brand-200 pb-3 inline-block">{{ sezioneManualeSelezionata.titolo }}</h3>
+              
+              <div class="prose prose-sm max-w-none text-slate-700 whitespace-normal leading-relaxed text-sm md:text-base font-medium" v-html="sezioneManualeSelezionata.contenuto"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+  </main>
+  
+  <nav v-if="!isDesktop && datiOperatore.registrato" class="absolute bottom-0 w-full h-16 glass-header border-t border-slate-200 flex items-center justify-around z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+    <button @click="mobileTab = 'form'" class="flex flex-col items-center justify-center w-full h-full gap-1" :class="mobileTab === 'form' ? 'text-brand-600 font-bold' : 'text-slate-400 font-semibold'"><i class="ph-fill ph-pencil-simple text-2xl transition-transform" :class="{'scale-110': mobileTab === 'form'}"></i><span class="text-[10px] tracking-wider uppercase">Input</span></button>
+    <button @click="mobileTab = 'stats'" class="flex flex-col items-center justify-center w-full h-full gap-1" :class="mobileTab === 'stats' ? 'text-brand-600 font-bold' : 'text-slate-400 font-semibold'"><i class="ph-fill ph-chart-pie-slice text-2xl transition-transform" :class="{'scale-110': mobileTab === 'stats'}"></i><span class="text-[10px] tracking-wider uppercase">Registro</span></button>
+    <button @click="mobileTab = 'archive'" class="flex flex-col items-center justify-center w-full h-full gap-1" :class="mobileTab === 'archive' ? 'text-brand-600 font-bold' : 'text-slate-400 font-semibold'"><i class="ph-fill ph-database text-2xl transition-transform" :class="{'scale-110': mobileTab === 'archive'}"></i><span class="text-[10px] tracking-wider uppercase">Archivio</span></button>
+    <button @click="mobileTab = 'manuale'; apriManuale()" class="flex flex-col items-center justify-center w-full h-full gap-1" :class="mobileTab === 'manuale' ? 'text-brand-600 font-bold' : 'text-slate-400 font-semibold'"><i class="ph-fill ph-book-open text-2xl transition-transform" :class="{'scale-110': mobileTab === 'manuale'}"></i><span class="text-[10px] tracking-wider uppercase">Manuale</span></button>
+  </nav>
+
+  <div v-if="modale.show" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end md:items-center justify-center p-0 md:p-4 transition-all">
+    <div class="bg-white w-full md:w-auto md:min-w-[450px] md:max-w-md rounded-t-3xl md:rounded-2xl max-h-[85vh] md:max-h-full flex flex-col shadow-2xl relative overflow-hidden">
+      <button @click="modale.show = false" class="absolute top-4 right-4 text-slate-400 hover:bg-slate-100 p-2 rounded-full transition-colors z-10 bg-white shadow-sm border border-slate-100"><i class="ph ph-x text-xl"></i></button>
+      
+      <div id="printAreaSingolo" class="p-7 overflow-y-auto no-scrollbar pb-6 bg-white text-slate-900">
+        <div class="text-brand-600 text-[10px] font-bold uppercase tracking-widest mb-1.5 border-b border-slate-100 pb-2 inline-block">Rif. {{ modale.dati.data }} - {{ modale.dati.ora }}</div>
+        <h3 class="text-3xl font-mono font-black text-slate-800 mb-6 tracking-wider">{{ modale.dati.targa || 'SENZA TARGA' }}</h3>
+        <div class="space-y-4 text-sm">
+          <div><p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">Motivo Principale</p><p class="text-slate-800 font-bold text-base">{{ modale.dati.motivo || 'N.D.' }}</p></div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">Nominativo</p><p class="text-slate-700 font-semibold">{{ modale.dati.nominativo || 'N.D.' }}</p></div>
+            <div><p class="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">Telefono</p><p class="text-slate-700 font-semibold">{{ modale.dati.telefono || 'N.D.' }}</p></div>
+          </div>
+          <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-2"><p class="text-[10px] uppercase font-black text-slate-400 tracking-widest mb-2">Note Operatore</p><p class="text-slate-700 text-sm whitespace-pre-wrap leading-relaxed font-medium">{{ modale.dati.note || 'Nessuna nota presente.' }}</p></div>
+        </div>
+      </div>
+      
+      <div class="bg-slate-50 px-6 py-5 border-t border-slate-200 flex flex-col md:flex-row justify-end gap-3 shrink-0">
+        <button @click="abilitaModifica" class="w-full md:w-auto bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-xl text-xs uppercase tracking-widest font-bold flex items-center justify-center gap-2 transition-colors shadow-sm">
+          <i class="ph-fill ph-pencil-simple text-lg"></i> Modifica
+        </button>
+        <button @click="scaricaSchedaPDFSingola" class="w-full md:w-auto bg-brand-600 hover:bg-brand-700 text-white px-6 py-3 rounded-xl text-xs uppercase tracking-widest font-bold flex items-center justify-center gap-2 transition-colors shadow-sm">
+          <i class="ph-fill ph-download-simple text-lg"></i> Stampa PDF
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="modaleEmail.show" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-7 relative text-center">
+      <button @click="modaleEmail.show = false" class="absolute top-4 right-4 text-slate-400 hover:bg-slate-100 p-2 rounded-full transition-colors"><i class="ph ph-x text-lg"></i></button>
+      <div class="w-14 h-14 bg-brand-50 text-brand-600 rounded-full flex items-center justify-center mx-auto mb-4"><i class="ph-fill ph-paper-plane-tilt text-3xl"></i></div>
+      <h3 class="text-xl font-black text-slate-800 mb-2">Opzioni di Invio</h3>
+      <p class="text-xs text-slate-500 mb-6 font-medium leading-relaxed">Come preferisci gestire il report di fine turno? Puoi salvarlo per controllarlo o inviarlo subito.</p>
+      
+      <div class="flex flex-col gap-3">
+        <button @click="modaleEmail.show = false; gestisciPDF('bozza')" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors border border-slate-200">
+          <i class="ph-fill ph-file-text text-xl"></i> Salva in Bozza
+        </button>
+        <button @click="modaleEmail.show = false; gestisciPDF('invia')" class="w-full bg-brand-600 hover:bg-brand-700 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors shadow-sm">
+          <i class="ph-fill ph-paper-plane-right text-xl"></i> Invia Subito
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <transition name="fade">
+    <div v-if="toast.show" class="fixed top-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl z-[150] border whitespace-nowrap"
+         :class="toast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-900'">
+      <p class="text-sm font-bold">{{ toast.message }}</p>
+    </div>
+  </transition>
+</div>
+
+<script>
+  if (typeof google === 'undefined') {
+    console.warn("Ambiente Google Apps Script non rilevato. Avvio in modalità Mock/Test.");
+    window.google = {
+      script: {
+        run: {
+          withSuccessHandler: function(cb) { this._success = cb; return this; },
+          withFailureHandler: function(cb) { this._failure = cb; return this; },
+          caricaSessioneOggi: function() {
+            setTimeout(() => this._success && this._success({
+              conteggio: 0, lista: [], motivi: ['Informazioni', 'Ricorso Prefetto', 'Ricorso GdP', 'Rateizzazione'], 
+              tags: ['Chiamata muta', 'Linea caduta'], 
+              operatore: { registrato: true, cognome: 'TEST', matricola: '0000', nomeFormat: 'TEST T.' },
+              scorciatoieMenu: [{nome: 'Google', link: 'https://google.com'}], scorciatoieBottoni: [{nome: 'App', link: '#'}], manualeUrl: '#'
+            }), 500);
+          },
+          ricercaStorica: function(f) { setTimeout(() => this._success && this._success({risultati: []}), 500); },
+          caricaManualeOperativo: function() { setTimeout(() => this._success && this._success([{id: 'mock', titolo: 'Test Normative', contenuto: '<p>Benvenuto, questo è un <b>test</b> del manuale.</p><a href="#">Link Cliccabile</a>'}]), 500); },
+          verificaEInizializzaOperatore: function(d) { setTimeout(() => this._success && this._success({registrato:true, cognome:d.cognome, matricola:d.matricola, nomeFormat:d.cognome+' M.'}), 500); },
+          salvaChiamata: function(p) { setTimeout(() => this._success && this._success({row: 99}), 500); },
+          aggiornaChiamata: function(p) { setTimeout(() => this._success && this._success({row: p.row}), 500); },
+          gestisciReportMailDaBase64: function() { setTimeout(() => this._success && this._success("Email mock inviata"), 500); }
+        }
+      }
+    };
+  }
+</script>
+
+<script>
+  const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+
+  createApp({
+    setup() {
+      const windowWidth = ref(window.innerWidth);
+      const isDesktop = computed(() => windowWidth.value >= 768);
+      const desktopTab = ref('desk'), mobileTab = ref('form');
+      const handleResize = () => { windowWidth.value = window.innerWidth; };
+      
+      const showDeskWrapper = computed(() => isDesktop.value ? desktopTab.value === 'desk' : (mobileTab.value === 'form' || mobileTab.value === 'stats'));
+      const showForm = computed(() => isDesktop.value ? desktopTab.value === 'desk' : mobileTab.value === 'form');
+      const showStats = computed(() => isDesktop.value ? desktopTab.value === 'desk' : mobileTab.value === 'stats');
+      const showArchive = computed(() => isDesktop.value ? desktopTab.value === 'archive' : mobileTab.value === 'archive');
+      const showManuale = computed(() => isDesktop.value ? desktopTab.value === 'manuale' : mobileTab.value === 'manuale');
+      
+      const dataOdierna = ref(new Date().toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' }));
+      const getDefaultForm = () => ({ targa: '', telefono: '', motivoSelezionato: '', nominativo: '', note: '' });
+      const form = ref(getDefaultForm()), targaInput = ref(null), editingRow = ref(null);
+      
+      const chiamateOggi = ref([]), totaleOggi = ref(0), isLoadingOggi = ref(true), animateCount = ref(false);
+      const opzioniMotivo = ref([]), macroNote = ref([]), menuMotivoAperto = ref(false);
+      
+      const datiOperatore = ref({ registrato: true, cognome: '', matricola: '', nomeFormat: '' });
+      const setupOp = ref({ cognome: '', nome: '', matricola: '' });
+      const isSubmittingSetup = ref(false);
+      const isGeneratingPDF = ref(false);
+
+      const scorciatoieMenu = ref([]);
+      const scorciatoieBottoni = ref([]);
+      const filtri = ref({ dataDa: '', dataA: '', query: '' });
+      const risultatiRicerca = ref([]);
+      const isSearching = ref(false);
+      const sezioniManuale = ref([]);
+      const sezioneManualeSelezionata = ref(null);
+      const isLoadingManuale = ref(false);
+      const modale = ref({ show: false, dati: null });
+      const modaleEmail = ref({ show: false });
+
+      const toast = ref({ show: false, message: '', type: 'success' });
+      const showToast = (msg, type = 'success') => { toast.value = { show: true, message: msg, type }; setTimeout(() => toast.value.show = false, 3500); };
+
+      const salvaDatiOperatoreIniziali = () => {
+        isSubmittingSetup.value = true;
+        google.script.run
+          .withSuccessHandler(res => {
+            datiOperatore.value = res;
+            isSubmittingSetup.value = false;
+            showToast("Database inizializzato con successo!");
+            setTimeout(() => window.location.reload(), 1500);
+          })
+          .withFailureHandler(err => {
+            isSubmittingSetup.value = false;
+            showToast("ERRORE CREAZIONE FILE: " + err.message, "error");
+            console.error(err);
+          })
+          .verificaEInizializzaOperatore(setupOp.value);
+      };
+
+      onMounted(() => {
+        window.addEventListener('resize', handleResize);
+        
+        google.script.run
+          .withSuccessHandler(res => {
+            datiOperatore.value = res.operatore;
+            totaleOggi.value = res.conteggio; chiamateOggi.value = res.lista; 
+            opzioniMotivo.value = res.motivi; macroNote.value = res.tags;
+            scorciatoieMenu.value = res.scorciatoieMenu || [];
+            scorciatoieBottoni.value = res.scorciatoieBottoni || [];
+            
+            isLoadingOggi.value = false;
+
+            if (datiOperatore.value.registrato) apriManuale();
+          })
+          .withFailureHandler(err => {
+            isLoadingOggi.value = false;
+            showToast("Errore critico di caricamento dal Server Google: " + err.message, 'error');
+            console.error(err);
+          })
+          .caricaSessioneOggi();
+          
+        avviaRicercaStorica();
+      });
+
+      onUnmounted(() => { window.removeEventListener('resize', handleResize); });
+
+      const gestisciTargaBlur = async () => { if (!form.value.targa) return; await navigator.clipboard.writeText(form.value.targa.split(/[/\\]/)[0].replace(/\s+/g, '').toUpperCase()); };
+      const apriMenuMotivo = () => { menuMotivoAperto.value = true; };
+      const chiudiMenuMotivoRitardato = () => setTimeout(() => menuMotivoAperto.value = false, 200);
+      const chiudiDropdowns = () => menuMotivoAperto.value = false;
+      const selezionaMotivo = (opt) => { form.value.motivoSelezionato = opt; menuMotivoAperto.value = false; };
+      
+      const opzioniMotivoFiltrate = computed(() => { 
+        if (!menuMotivoAperto.value) return [];
+        const q = form.value.motivoSelezionato.toLowerCase().trim(); 
+        if (!q) return opzioniMotivo.value;
+        const esattoMatch = opzioniMotivo.value.some(opt => opt.toLowerCase() === q);
+        if (esattoMatch) return opzioniMotivo.value;
+        const filtrati = opzioniMotivo.value.filter(opt => opt.toLowerCase().includes(q));
+        return filtrati.length > 0 ? filtrati : opzioniMotivo.value; 
+      });
+
+      const aggiungiNota = (nota) => { form.value.note = form.value.note ? `${form.value.note} - [${nota}]` : `[${nota}]`; };
+      const apriLinkRapido = (event) => { const url = event.target.value; if (url) { window.open(url, '_blank'); event.target.value = ''; } };
+      const apriLinkDiretto = (url) => { if (url) window.open(url, '_blank'); };
+
+      const suggerimentoContestuale = computed(() => {
+        const m = form.value.motivoSelezionato.toLowerCase();
+        if (!m) return null;
+        
+        // --- NUOVI SUGGERIMENTI ---
+        if (m.includes('sollecit')) return "Attenzione avviso Bonario: NON è permesso il ricorso. Il Cittadino deve attendere l'atto ingiuntivo.";
+        if (m.includes('ingiunzion') || m.includes('ruolo')) return "Verbale a Ruolo: gestione affidata all'ufficio Entrate e Riscossione Coattiva Comune di Bologna.";
+        if (m.includes('ingresso') || m.includes('sosta')) return "Contatti Sosty - Ufficio mobilità - URP PL.";
+        if (m.includes('pagament')) return "Pagamento ammesso tramite: Qr Code Pago PA - Portale Guarda multe - Codice CBILL - IBAN.";
+        if (m.includes('rilascio') || m.includes('atti')) return "Inviare richiesta a plguardamulte@comune.bologna.it - Allegare copia CIE del Proprietario.";
+        if (m.includes('mail') || m.includes('risposta') || m.includes('già inviata')) return "Attendere risposta. ATTENZIONE: la comunicazione NON sospende i termini per il ricorso!";
+        if (m.includes('pendent') || m.includes('controllo')) return "Non fornire informazioni telefoniche! Inviare richiesta a plguardamulte@comune.bologna.it - Allegare copia CIE del Proprietario.";
+
+        // --- VECCHI SUGGERIMENTI ---
+        if (m.includes('prefett')) return "Max 60 giorni dalla notifica. Il cittadino NON deve aver pagato.";
+        if (m.includes('giudice') || m.includes('gdp')) return "Ammesso entro 30 gg dalla notifica. Richiede Contributo Unificato PagoPA.";
+        if (m.includes('rateizz')) return "Entro 30 gg per importi > 200€. Limite reddito 10.628,16€.";
+        if (m.includes('sosty') || m.includes('contrassegn')) return "Sosty Call Center: 800-108088. Pagamenti solo via POS agli sportelli.";
+        if (m.includes('punti') || m.includes('patente')) return "Verifica punti: Portale Automobilista o 06 45775962 (H24).";
+        
+        return null;
+      });
+
+      const salvaDati = () => {
+        if (!form.value.targa && !form.value.nominativo && !form.value.motivoSelezionato && !form.value.note) return showToast('Compila almeno un campo', 'error');
+        const payload = { row: editingRow.value, targa: form.value.targa, telefono: form.value.telefono, motivo: form.value.motivoSelezionato, nominativo: form.value.nominativo, note: form.value.note };
+        
+        if (editingRow.value) {
+          google.script.run
+            .withSuccessHandler(res => {
+              const idxOggi = chiamateOggi.value.findIndex(x => x.row === res.row);
+              if (idxOggi !== -1) { chiamateOggi.value[idxOggi] = {...chiamateOggi.value[idxOggi], ...res}; }
+              const idxRic = risultatiRicerca.value.findIndex(x => x.row === res.row);
+              if (idxRic !== -1) { risultatiRicerca.value[idxRic] = {...risultatiRicerca.value[idxRic], ...res}; }
+              form.value = getDefaultForm(); editingRow.value = null; showToast('Chiamata aggiornata!');
+            })
+            .withFailureHandler(err => {
+              showToast('Errore durante l\'aggiornamento.', 'error');
+              console.error(err);
+            })
+            .aggiornaChiamata(payload);
+        } else {
+          const tempId = 'temp_' + Date.now();
+          chiamateOggi.value.unshift({ row: tempId, ora: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }), data: new Date().toLocaleDateString('it-IT'), targa: payload.targa.toUpperCase(), nominativo: payload.nominativo, telefono: payload.telefono, motivo: payload.motivo, note: payload.note, pending: true });
+          risultatiRicerca.value.unshift(chiamateOggi.value[0]);
+          totaleOggi.value++; form.value = getDefaultForm(); animateCount.value = true; setTimeout(() => animateCount.value = false, 300);
+          showToast('Salvato correttamente!');
+
+          google.script.run
+            .withSuccessHandler(res => {
+              const item = chiamateOggi.value.find(x => x.row === tempId);
+              if (item) { item.row = res.row; delete item.pending; }
+              const itemRic = risultatiRicerca.value.find(x => x.row === tempId);
+              if (itemRic) { itemRic.row = res.row; delete itemRic.pending; }
+            })
+            .withFailureHandler(err => {
+              showToast('Errore di salvataggio.', 'error');
+              console.error(err);
+            })
+            .salvaChiamata(payload);
+        }
+      };
+
+      const avviaRicercaStorica = () => {
+        isSearching.value = true;
+        google.script.run
+        .withSuccessHandler(res => { 
+            risultatiRicerca.value = res.risultati; isSearching.value = false; 
+        })
+        .withFailureHandler(err => {
+            isSearching.value = false; showToast('Errore durante la ricerca', 'error');
+            console.error(err);
+        }).ricercaStorica(filtri.value);
+      };
+
+      const apriManuale = () => {
+        if (sezioniManuale.value.length > 0) return;
+        isLoadingManuale.value = true;
+        google.script.run
+          .withSuccessHandler(sezioni => {
+              sezioniManuale.value = sezioni;
+              if (sezioni.length > 0) sezioneManualeSelezionata.value = sezioni[0];
+              isLoadingManuale.value = false; 
+          })
+          .withFailureHandler(err => {
+             isLoadingManuale.value = false; 
+             showToast('Impossibile caricare il manuale.', 'error');
+             console.error(err);
+          })
+          .caricaManualeOperativo();
+      };
+
+      const apriDettaglio = (row) => modale.value = { show: true, dati: row };
+      const abilitaModifica = () => {
+        const d = modale.value.dati;
+        form.value = { targa: d.targa !== '-' ? d.targa : '', telefono: d.telefono !== '-' ? d.telefono : '', motivoSelezionato: d.motivo !== '-' ? d.motivo : '', nominativo: d.nominativo !== '-' && d.nominativo !== 'N.D.' ? d.nominativo : '', note: d.note !== '-' && d.note !== 'Nessuna nota presente.' ? d.note : '' };
+        editingRow.value = d.row; modale.value.show = false;
+        if (isDesktop.value) desktopTab.value = 'desk'; else mobileTab.value = 'form';
+      };
+      const annullaModifica = () => { form.value = getDefaultForm(); editingRow.value = null; };
+
+      const scaricaSchedaPDFSingola = () => {
+        const el = document.getElementById('printAreaSingolo');
+        html2pdf().set({ margin: 15, filename: `Scheda_${modale.value.dati.targa || 'Dettaglio'}.pdf`, html2canvas: { scale: 2 }, jsPDF: { format: 'a5' } }).from(el).save();
+      };
+
+      const gestisciPDF = (azione) => {
+        if (chiamateOggi.value.length === 0) return showToast('Nessuna chiamata oggi.', 'error');
+        isGeneratingPDF.value = true;
+        
+        let msg = "Generazione PDF...";
+        if (azione === 'invia') msg = "Invio in corso...";
+        if (azione === 'bozza') msg = "Salvataggio in bozza...";
+        showToast(msg);
+
+        const opFirma = datiOperatore.value.registrato ? `${datiOperatore.value.nomeFormat} (Matr. ${datiOperatore.value.matricola})` : "Operatore";
+        let rowsHtml = chiamateOggi.value.map(ch => `<tr><td style="padding:6px;border:1px solid #cbd5e1;">${ch.ora||''}</td><td style="padding:6px;border:1px solid #cbd5e1;font-weight:bold;">${ch.targa||'-'}</td><td style="padding:6px;border:1px solid #cbd5e1;">${ch.nominativo||'-'}</td><td style="padding:6px;border:1px solid #cbd5e1;">${ch.motivo||'-'}</td></tr>`).join('');
+        const container = document.createElement('div');
+        container.style.padding = '24px'; container.style.fontFamily = 'Arial, sans-serif';
+        container.innerHTML = `<div style="border-bottom: 2px solid #0284c7; padding-bottom: 12px; margin-bottom: 16px;"><h1 style="font-size: 18px; color: #0284c7;">REPORT CALL CENTER - ${new Date().toLocaleDateString('it-IT')}</h1><p style="font-size: 12px;">Generato da: ${opFirma} - Totale: ${chiamateOggi.value.length}</p></div><table style="width: 100%; border-collapse: collapse; text-align: left; font-size:11px;"><thead><tr style="background-color: #0284c7; color: #fff;"><th>Ora</th><th>Targa</th><th>Nominativo</th><th>Motivo</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+
+        const opt = { margin: 10, filename: `Report_${new Date().toISOString().slice(0,10)}.pdf`, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+
+        if (azione === 'scarica') {
+          html2pdf().set(opt).from(container).save().then(() => { isGeneratingPDF.value = false; showToast('PDF scaricato!'); });
+        } else if (azione === 'invia' || azione === 'bozza') {
+          html2pdf().set(opt).from(container).outputPdf('datauristring').then(pdfBase64 => {
+            google.script.run
+              .withSuccessHandler((messaggio) => { isGeneratingPDF.value = false; showToast(messaggio); })
+              .withFailureHandler(e => { isGeneratingPDF.value = false; showToast("Errore di invio: " + e.message, "error"); console.error(e); })
+              .gestisciReportMailDaBase64(azione, pdfBase64, totaleOggi.value, datiOperatore.value.nomeFormat, datiOperatore.value.matricola);
+          });
+        }
+      };
+
+      return { isDesktop, desktopTab, mobileTab, showDeskWrapper, showForm, showStats, showArchive, showManuale, dataOdierna, form, targaInput, editingRow, chiamateOggi, totaleOggi, isLoadingOggi, animateCount, opzioniMotivoFiltrate, macroNote, menuMotivoAperto, toast, datiOperatore, setupOp, isSubmittingSetup, isGeneratingPDF, filtri, risultatiRicerca, isSearching, sezioniManuale, sezioneManualeSelezionata, isLoadingManuale, modale, modaleEmail, suggerimentoContestuale, scorciatoieMenu, scorciatoieBottoni, salvaDatiOperatoreIniziali, salvaDati, apriMenuMotivo, chiudiDropdowns, selezionaMotivo, chiudiMenuMotivoRitardato, gestisciTargaBlur, aggiungiNota, gestisciPDF, avviaRicercaStorica, apriManuale, apriDettaglio, abilitaModifica, annullaModifica, scaricaSchedaPDFSingola, apriLinkRapido, apriLinkDiretto };
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>
